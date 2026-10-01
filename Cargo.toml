@@ -1,0 +1,38 @@
+[package]
+name = "hires-rs"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[features]
+default = ["wgpu"]
+wgpu = ["burn/wgpu"]
+flex = ["burn/flex"]
+metal = ["burn/metal"]
+cuda = ["burn/cuda"]
+
+[dependencies]
+anyhow = "1"
+burn = { version = "0.22.0-pre.4", default-features = false, features = ["std", "store"] }
+burn-store = { version = "0.22.0-pre.4", default-features = false, features = ["std"] }
+clap = { version = "4", features = ["derive"] }
+fast_image_resize = { version = "6", features = ["image", "rayon"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "webp"] }
+imageproc = "0.25"
+ab_glyph = "0.2"
+ndarray = "0.16"
+nalgebra = "0.33"
+walkdir = "2"
+
+[workspace]
+members = [
+    ".",
+    "plugins/hires",
+    "plugins/version-helper",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/HiRes491/HiRes"
+rust-version = "1.86"
