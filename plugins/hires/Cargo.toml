@@ -17,7 +17,7 @@ bytes = "1"
 burn = { version = "0.22.0-pre.4", default-features = false, features = ["std"] }
 
 [build-dependencies]
-gst-plugin-version-helper = { path = "../version-helper" }
+gst-plugin-version-helper = "0.8.4"
 
 [features]
 default = ["wgpu"]

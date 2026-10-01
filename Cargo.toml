@@ -28,11 +28,10 @@ walkdir = "2"
 members = [
     ".",
     "plugins/hires",
-    "plugins/version-helper",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-repository = "https://github.com/HiRes491/HiRes"
+repository = "https://github.com/vesuvisian/hires-rs"
 rust-version = "1.86"
