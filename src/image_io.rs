@@ -1,9 +1,7 @@
 use std::cell::RefCell;
-use std::path::Path;
 
-use anyhow::{Context, Result};
 use fast_image_resize::{FilterType, ResizeAlg, ResizeOptions, Resizer};
-use image::{DynamicImage, RgbImage};
+use image::RgbImage;
 
 pub const IMG_EXTS: &[&str] = &["jpg", "jpeg", "png", "bmp", "webp"];
 
@@ -13,6 +11,11 @@ thread_local! {
 
 pub(crate) fn with_resizer<R>(f: impl FnOnce(&mut Resizer) -> R) -> R {
     RESIZER.with(|r| f(&mut r.borrow_mut()))
+}
+
+/// Decode JPEG/PNG/BMP/WebP bytes the same way the CLI opens files.
+pub fn load_rgb_from_memory(bytes: &[u8]) -> anyhow::Result<RgbImage> {
+    Ok(image::load_from_memory(bytes)?.to_rgb8())
 }
 
 /// Bilinear resize — stand-in for `image::imageops::FilterType::Triangle`.
@@ -49,21 +52,29 @@ fn resize_rgb(src: &RgbImage, new_w: u32, new_h: u32, alg: ResizeAlg) -> RgbImag
     dst
 }
 
-pub fn load_rgb(path: &Path) -> Result<RgbImage> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_rgb(path: &std::path::Path) -> anyhow::Result<RgbImage> {
+    use anyhow::Context;
+
     let img = image::open(path)
         .with_context(|| format!("failed to open {}", path.display()))?
         .to_rgb8();
     Ok(img)
 }
 
-pub fn save_rgb(path: &Path, img: &RgbImage) -> Result<()> {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn save_rgb(path: &std::path::Path, img: &RgbImage) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use image::DynamicImage;
+
     DynamicImage::ImageRgb8(img.clone())
         .save(path)
         .with_context(|| format!("failed to save {}", path.display()))?;
     Ok(())
 }
 
-pub fn is_image_path(path: &Path) -> bool {
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_image_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| IMG_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))

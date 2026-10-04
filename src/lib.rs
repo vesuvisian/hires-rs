@@ -9,6 +9,7 @@ pub mod segmentation;
 pub mod viz;
 
 pub use burn::prelude::Device;
+pub use burn::tensor::DeviceKind;
 
 /// Resolve the Burn device from the active crate features.
 pub fn resolve_device() -> Device {

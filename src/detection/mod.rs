@@ -64,14 +64,30 @@ pub fn letterbox(img: &RgbImage, size: u32) -> (RgbImage, LetterboxMeta) {
 /// Decode YOLO export `(1, 5, N)` → boxes in original image coordinates.
 ///
 /// Filters on-device with a confidence mask before a small D2H transfer of survivors.
+/// On wasm, use [`decode_yolo_async`] — WebGPU cannot read tensors synchronously.
 pub fn decode_yolo(output: Tensor<3>, meta: &LetterboxMeta, conf_thresh: f32) -> Vec<Detection> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (output, meta, conf_thresh);
+        panic!("decode_yolo is sync; use decode_yolo_async on wasm");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pollster::block_on(decode_yolo_async(output, meta, conf_thresh))
+}
+
+/// Async decode for WebGPU/wasm (no blocking D2H).
+pub async fn decode_yolo_async(
+    output: Tensor<3>,
+    meta: &LetterboxMeta,
+    conf_thresh: f32,
+) -> Vec<Detection> {
     // [1, 5, N] → [5, N]
     let pred = output.squeeze_dim::<2>(0);
     // Slice keeps rank ([1, N]); squeeze so argwhere yields [K, 1], not [K, 2].
     let conf = pred.clone().slice(s![4..5, ..]).squeeze_dim::<1>(0); // [N]
     let boxes = pred.slice(s![0..4, ..]).swap_dims(0, 1); // [N, 4] cx,cy,w,h
 
-    let idx2d = conf.clone().greater_elem(conf_thresh).argwhere(); // [K, 1]
+    let idx2d = conf.clone().greater_elem(conf_thresh).argwhere_async().await; // [K, 1]
     let k = idx2d.dims()[0];
     if k == 0 {
         return Vec::new();
@@ -82,14 +98,30 @@ pub fn decode_yolo(output: Tensor<3>, meta: &LetterboxMeta, conf_thresh: f32) ->
     let conf_f = conf.select(0, indices); // [K]
 
     let box_vals = boxes_f
-        .into_data()
+        .into_data_async()
+        .await
+        .expect("f32 yolo boxes")
         .try_to_vec::<f32>()
         .expect("f32 yolo boxes");
     let conf_vals = conf_f
-        .into_data()
+        .into_data_async()
+        .await
+        .expect("f32 yolo conf")
         .try_to_vec::<f32>()
         .expect("f32 yolo conf");
 
+    // Re-check on the host: wgpu/WebGPU `greater_elem` + `argwhere` can leak
+    // almost every anchor, which then looks like det_conf=0 (many tiny boxes).
+    detections_from_xywh(&box_vals, &conf_vals, k, meta, conf_thresh)
+}
+
+fn detections_from_xywh(
+    box_vals: &[f32],
+    conf_vals: &[f32],
+    k: usize,
+    meta: &LetterboxMeta,
+    conf_thresh: f32,
+) -> Vec<Detection> {
     let mut dets = Vec::with_capacity(k);
     for i in 0..k {
         let cx = box_vals[i * 4];
@@ -97,7 +129,9 @@ pub fn decode_yolo(output: Tensor<3>, meta: &LetterboxMeta, conf_thresh: f32) ->
         let bw = box_vals[i * 4 + 2];
         let bh = box_vals[i * 4 + 3];
         let conf = conf_vals[i];
-
+        if !(conf > conf_thresh) {
+            continue;
+        }
         // xywh in letterboxed space → xyxy
         let mut x1 = cx - bw / 2.0;
         let mut y1 = cy - bh / 2.0;
@@ -192,9 +226,31 @@ pub fn detect_resistors_with(
     device: &Device,
     conf_thresh: f32,
 ) -> Vec<Detection> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (model, img, device, conf_thresh);
+        panic!("detect_resistors_with is sync; use detect_resistors_with_async on wasm");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pollster::block_on(detect_resistors_with_async(
+        model,
+        img,
+        device,
+        conf_thresh,
+    ))
+}
+
+pub async fn detect_resistors_with_async(
+    model: &model::Model,
+    img: &RgbImage,
+    device: &Device,
+    conf_thresh: f32,
+) -> Vec<Detection> {
     let (input, meta) = letterbox_to_tensor(img, DET_SIZE, device);
     let output = model.forward(input);
-    let raw = decode_yolo(output, &meta, conf_thresh);
+    let raw = decode_yolo_async(output, &meta, conf_thresh).await;
     let keep = nms(&raw, 0.5);
     keep.into_iter().map(|i| raw[i].clone()).collect()
 }
+
+

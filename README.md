@@ -20,7 +20,7 @@ weights/
 
 ## Features (Burn backends)
 
-Both the CLI (`hires-rs`) and the GStreamer plugin (`hires`) share the same feature flags. Default is `wgpu`. For a different backend, pass `--no-default-features --features <name>` so only one backend is enabled.
+Both the CLI (`hires-rs`) and the GStreamer plugin (`hires`) share the same backend flags. Default is `wgpu` plus `cli` (clap / walkdir for the binary). For a different backend, pass `--no-default-features --features <backend>,cli` when running the CLI so only one GPU/CPU backend is enabled. The wasm demo and plugin use `--no-default-features --features <backend>` (no `cli`).
 
 | Feature | Backend | Notes |
 |---------|---------|--------|
@@ -28,6 +28,7 @@ Both the CLI (`hires-rs`) and the GStreamer plugin (`hires`) share the same feat
 | `metal` | Burn CubeCL Metal | Native Metal (`Device::metal`). Prefer this on Apple Silicon for best FPS. |
 | `cuda` | Burn CubeCL CUDA | Native CUDA (`Device::cuda(0)`). |
 | `flex` | Burn flex | CPU / portable path when no GPU backend is wanted. |
+| `cli` | — | CLI only (`clap`, `walkdir`). On by default with `wgpu`; enable it whenever you `--no-default-features` the binary. |
 
 Always build with `--release` for realtime use.
 
@@ -41,11 +42,11 @@ cargo run --release -- path/to/image.jpg
 cargo run --release -- path/to/images/ --output-dir results/pipeline_output
 
 # CPU (flex)
-cargo run --release --no-default-features --features flex -- path/to/image.jpg
+cargo run --release --no-default-features --features flex,cli -- path/to/image.jpg
 
 # Native Metal (macOS) / CUDA
-cargo run --release --no-default-features --features metal -- path/to/image.jpg
-cargo run --release --no-default-features --features cuda -- path/to/image.jpg
+cargo run --release --no-default-features --features metal,cli -- path/to/image.jpg
+cargo run --release --no-default-features --features cuda,cli -- path/to/image.jpg
 ```
 
 CLI flags mirror `pipeline.py`: `--det-weights`, `--seg-weights`, `--output-dir`, `--size`.
@@ -99,3 +100,51 @@ Each `.onnx` is written next to its `.pt`. Detection: `(1, 3, 640, 640)` → `(1
 
 - HiRes (`pipeline.py`) gates Ultralytics detection at `conf=0.01`. The Burn/ONNX path scores lower (true positives often ≈0.006–0.009), so the library/CLI default is `0.001`. The GStreamer element defaults to `0.005` and exposes `confidence` so you can tune live false positives without rebuilding.
 - Models are generated Burn modules from the HiRes ONNX exports; architectures are not hand-written.
+
+## Browser demo
+
+The docs site is [Zensical](https://zensical.org/). An iframe loads a wasm-bindgen app (`web/`) that runs `process_rgb_overlay` / `process_rgb_overlay_bands` in the browser.
+
+- WebGPU (`burn/webgpu`) when `navigator.gpu` is present; otherwise Flex CPU. Default CLI `wgpu` on macOS is wgpu’s Metal HAL with CubeCL **WGSL**, not CubeCL MSL — different lowering than the browser, so YOLO scores (and boxes after NMS) can disagree on the same JPEG. See [How it works](docs/how-it-works.md#backends).
+- Upload or drop a still image, optional band-color overlay
+- Weights are fetched at runtime from `docs/app/weights/` (not `include_bytes!`)
+
+### Local preview
+
+You need the vendored `weights/*.bpk` files, a recent Rust toolchain, [wasm-pack](https://rustwasm.github.io/wasm-pack/), and [Zensical](https://zensical.org/docs/get-started/). Do not open `index.html` as `file://` (wasm requires http://localhost).
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+# If `pip install zensical` is blocked (PEP 668), use a venv:
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install zensical
+
+# From the repo root — release wasm is slow the first time
+wasm-pack build web --release --target web --out-dir "$PWD/docs/app/pkg-wgpu" \
+  -- --no-default-features --features wgpu
+wasm-pack build web --release --target web --out-dir "$PWD/docs/app/pkg-flex" \
+  -- --no-default-features --features flex
+bash web/stage.sh            # copies web/index.html, demo.js/css, and weights into docs/app/
+
+zensical build --clean
+python3 web/preview.py       # http://127.0.0.1:8000/hires-rs/  (wasm MIME + Pages path)
+
+# `zensical serve` is fine for editing docs, but its preview server often
+# serves .wasm as the wrong MIME type. instantiateStreaming then falls
+# back (slower). GitHub Pages sends the correct type.
+
+```
+
+`stage.sh` warns if `weights/` is missing; the iframe will load but inference will fail until those burnpacks are present. After changing `web/index.html`, `demo.js`, or `demo.css`, re-run `bash web/stage.sh` (no wasm rebuild). After changing `web/src` or `hires-rs`, re-run the `wasm-pack` commands.
+
+For a faster iteration loop you can swap `--release` for `--dev` on `wasm-pack`; the GitHub Pages workflow always builds `--release`.
+
+### GitHub Pages
+
+The demo is meant to live at [https://vesuvisian.com/hires-rs/](https://vesuvisian.com/hires-rs/) (`zensical.toml` `site_url`). That path is the user-site custom domain (`vesuvisian.com`) plus this repo name — GitHub serves project Pages there automatically. Do **not** set a custom domain on *this* repository, or it would take over the apex instead of `/hires-rs/`.
+
+Set this repo’s Pages source to **GitHub Actions**. The workflow builds both wasm packs, copies `weights/*.bpk` into `docs/app/`, then `zensical build`. Each `.bpk` must be under GitHub’s 100 MB file limit (or copied from a Release in CI).
+

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HiRes</title>
+    <link rel="stylesheet" href="./demo.css" />
+  </head>
+  <body>
+    <div id="app">
+      <p id="status">Loading…</p>
+      <div class="toolbar">
+        <label>
+          Upload
+          <input id="file" type="file" accept="image/*" />
+        </label>
+        <label class="check">
+          <input id="bands" type="checkbox" />
+          Band overlay
+        </label>
+        <label class="conf">
+          Conf
+          <input
+            id="conf"
+            type="range"
+            min="1"
+            max="20"
+            step="1"
+            value="1"
+          />
+          <span id="conf-val">0.001</span>
+        </label>
+      </div>
+      <div id="drop" class="drop">
+        <canvas id="view"></canvas>
+        <p id="hint">Drop an image or use Upload.</p>
+      </div>
+      <p id="meta"></p>
+    </div>
+    <script type="module" src="./demo.js"></script>
+  </body>
+</html>

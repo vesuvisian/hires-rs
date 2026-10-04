@@ -4,9 +4,17 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+[[bin]]
+name = "hires-rs"
+path = "src/main.rs"
+required-features = ["cli"]
+
 [features]
-default = ["wgpu"]
+default = ["wgpu", "cli"]
+cli = ["dep:clap", "dep:walkdir"]
 wgpu = ["burn/wgpu"]
+# Pins CubeCL to WGSL; implies `wgpu` so `resolve_device` / cfg gates still fire.
+webgpu = ["wgpu", "burn/webgpu"]
 flex = ["burn/flex"]
 metal = ["burn/metal"]
 cuda = ["burn/cuda"]
@@ -15,19 +23,28 @@ cuda = ["burn/cuda"]
 anyhow = "1"
 burn = { version = "0.22.0-pre.4", default-features = false, features = ["std", "store"] }
 burn-store = { version = "0.22.0-pre.4", default-features = false, features = ["std"] }
-clap = { version = "4", features = ["derive"] }
-fast_image_resize = { version = "6", features = ["image", "rayon"] }
+clap = { version = "4", features = ["derive"], optional = true }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "webp"] }
 imageproc = "0.25"
 ab_glyph = "0.2"
 ndarray = "0.16"
 nalgebra = "0.33"
-walkdir = "2"
+walkdir = { version = "2", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+fast_image_resize = { version = "6", features = ["image", "rayon"] }
+pollster = "0.4"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+fast_image_resize = { version = "6", features = ["image"] }
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 
 [workspace]
 members = [
     ".",
     "plugins/hires",
+    "web",
 ]
 
 [workspace.package]

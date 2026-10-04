@@ -158,7 +158,7 @@ struct PassOut {
 }
 
 /// Batched inference pass. Returns one mask (original crop size) per input.
-fn run_pass_batch(
+async fn run_pass_batch_async(
     model: &model::Model,
     imgs: &[&RgbImage],
     device: &Device,
@@ -171,15 +171,26 @@ fn run_pass_batch(
     let (input, pads) = resize_pad_batch_to_tensor(imgs, size, device);
     let logits = model.forward(input);
     let pred = logits.clone().argmax(1);
-    let pred_data = pred.to_data().try_to_vec::<i32>().expect("argmax i32");
+    let pred_data = pred
+        .into_data_async()
+        .await
+        .expect("argmax i32")
+        .try_to_vec::<i32>()
+        .expect("argmax i32");
     let s = size;
     let plane = s * s;
 
     let probs_data = if compute_conf {
         let probs = softmax(logits, 1);
-        Some(probs.to_data().try_to_vec::<f32>().expect("probs f32"))
+        Some(
+            probs
+                .into_data_async()
+                .await
+                .expect("probs f32")
+                .try_to_vec::<f32>()
+                .expect("probs f32"),
+        )
     } else {
-        // Drop logits without softmax when conf is unused.
         drop(logits);
         None
     };
@@ -244,11 +255,27 @@ pub fn run_inference_batch(
     size: usize,
     opts: SegOptions,
 ) -> Vec<SegResult> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (model, imgs, device, size, opts);
+        panic!("run_inference_batch is sync; use run_inference_batch_async on wasm");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pollster::block_on(run_inference_batch_async(model, imgs, device, size, opts))
+}
+
+pub async fn run_inference_batch_async(
+    model: &model::Model,
+    imgs: &[&RgbImage],
+    device: &Device,
+    size: usize,
+    opts: SegOptions,
+) -> Vec<SegResult> {
     if imgs.is_empty() {
         return Vec::new();
     }
 
-    let mut passes = run_pass_batch(model, imgs, device, size, opts.compute_conf);
+    let mut passes = run_pass_batch_async(model, imgs, device, size, opts.compute_conf).await;
 
     if opts.refine {
         struct RefineJob {
@@ -317,7 +344,8 @@ pub fn run_inference_batch(
 
         if !jobs.is_empty() {
             let refine_refs: Vec<&RgbImage> = jobs.iter().map(|j| &j.crop).collect();
-            let refine_outs = run_pass_batch(model, &refine_refs, device, size, opts.compute_conf);
+            let refine_outs =
+                run_pass_batch_async(model, &refine_refs, device, size, opts.compute_conf).await;
             for (job, out) in jobs.iter().zip(refine_outs) {
                 let crop_mask =
                     if out.width as usize != job.crop_w || out.height as usize != job.crop_h {

@@ -1,0 +1,35 @@
+[package]
+name = "hires-web"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+description = "Browser wasm-bindgen demo for HiRes resistor detection"
+publish = false
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[features]
+default = ["wgpu"]
+# Pin CubeCL to the WebGPU/WGSL compiler (not Auto/Metal/Vulkan).
+wgpu = ["hires-rs/webgpu", "burn/webgpu"]
+flex = ["hires-rs/flex"]
+
+[dependencies]
+hires-rs = { path = "..", default-features = false }
+burn = { version = "0.22.0-pre.4", default-features = false, features = ["std"] }
+bytes = "1"
+console_error_panic_hook = "0.1"
+image = { version = "0.25", default-features = false }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

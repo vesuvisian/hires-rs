@@ -3,3 +3,7 @@
 .DS_Store
 *.onnx
 *.pt
+/site
+/docs/app
+/web/pkg
+/.venv

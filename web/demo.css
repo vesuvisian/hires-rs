@@ -1,0 +1,102 @@
+:root {
+  color-scheme: light dark;
+  font-family: "Helvetica Neue", Helvetica, sans-serif;
+  --bg: #1b1b1f;
+  --fg: #f4f4f5;
+  --muted: #a1a1aa;
+  --accent: #00d26a;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f4f5;
+    --fg: #18181b;
+    --muted: #52525b;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem 0.75rem;
+  gap: 0.5rem;
+}
+
+#status,
+#meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+button,
+input[type="file"] {
+  font: inherit;
+}
+
+.check,
+.conf {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.drop {
+  position: relative;
+  flex: 1;
+  min-height: 12rem;
+  border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent);
+  border-radius: 0.25rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 80%, #000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.drop.drag {
+  border-color: var(--accent);
+}
+
+#view {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+}
+
+#hint {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  pointer-events: none;
+  text-align: center;
+  padding: 1rem;
+}
+
+#hint.hidden {
+  display: none;
+}

@@ -1852,6 +1852,7 @@ pub struct Model {
 
 extern crate std;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for Model {
     fn default() -> Self {
         Self::from_file(
@@ -1863,6 +1864,7 @@ impl Default for Model {
 
 impl Model {
     /// Load model weights from a burnpack file.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file<P: AsRef<std::path::Path>>(file: P, device: &Device) -> Self {
         let mut model = Self::new(device);
         let mut store = BurnpackStore::from_file(&file);

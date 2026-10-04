@@ -86,7 +86,7 @@ fn main() -> Result<()> {
         }
         for d in &detections {
             println!(
-                "{fname}  →  resistor {}: {} {}  (det={:.2}, seg={:.2})",
+                "{fname}  →  resistor {}: {} {}  (det={:.4}, seg={:.4})",
                 d.crop, d.value, d.tolerance, d.det_conf, d.seg_conf
             );
         }

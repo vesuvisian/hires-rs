@@ -1,18 +1,26 @@
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
 use burn::prelude::Device;
 use image::RgbImage;
-use walkdir::WalkDir;
 
 use crate::band::{AxisInfo, BandInfo, DecodeOutcome, calculate_resistance_with_axis_info};
 use crate::detection::model::Model as DetectionModel;
 use crate::detection::{self, Detection, expand_box};
-use crate::image_io::{is_image_path, load_rgb, save_rgb};
 use crate::segmentation::model::Model as SegmentationModel;
-use crate::segmentation::{SegOptions, run_inference_batch};
+use crate::segmentation::{SegOptions, run_inference_batch_async};
+
+#[cfg(feature = "cli")]
+use std::path::{Path, PathBuf};
+
+#[cfg(feature = "cli")]
+use anyhow::{Context, Result};
+#[cfg(feature = "cli")]
+use walkdir::WalkDir;
+
+#[cfg(feature = "cli")]
+use crate::image_io::{is_image_path, load_rgb, save_rgb};
+#[cfg(feature = "cli")]
 use crate::viz::{CompositeArgs, make_composite};
 
+#[cfg(feature = "cli")]
 pub struct PipelineArgs {
     pub output_dir: PathBuf,
     pub size: usize,
@@ -111,6 +119,7 @@ impl AnnotatedDetection {
     }
 }
 
+#[cfg(feature = "cli")]
 pub fn collect_inputs(input: &Path) -> Result<Vec<PathBuf>> {
     if input.is_dir() {
         let mut paths: Vec<_> = WalkDir::new(input)
@@ -197,8 +206,28 @@ pub fn process_rgb_with(
     size: usize,
     opts: ProcessOptions,
 ) -> Vec<AnnotatedDetection> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (img, det_model, seg_model, device, size, opts);
+        panic!("process_rgb_with is sync; use process_rgb_with_async on wasm");
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pollster::block_on(process_rgb_with_async(
+        img, det_model, seg_model, device, size, opts,
+    ))
+}
+
+pub async fn process_rgb_with_async(
+    img: &RgbImage,
+    det_model: &DetectionModel,
+    seg_model: &SegmentationModel,
+    device: &Device,
+    size: usize,
+    opts: ProcessOptions,
+) -> Vec<AnnotatedDetection> {
     let (img_w, img_h) = img.dimensions();
-    let dets = detection::detect_resistors_with(det_model, img, device, opts.det_conf);
+    let dets =
+        detection::detect_resistors_with_async(det_model, img, device, opts.det_conf).await;
     if dets.is_empty() {
         return Vec::new();
     }
@@ -237,7 +266,7 @@ pub fn process_rgb_with(
     }
 
     let crop_refs: Vec<&RgbImage> = jobs.iter().map(|j| &j.crop).collect();
-    let segs = run_inference_batch(seg_model, &crop_refs, device, size, opts.seg);
+    let segs = run_inference_batch_async(seg_model, &crop_refs, device, size, opts.seg).await;
 
     let keep_bands = opts.keep_composite_inputs;
     let mut results = Vec::with_capacity(jobs.len());
@@ -294,6 +323,7 @@ pub fn process_rgb_with(
     results
 }
 
+#[cfg(feature = "cli")]
 pub fn run_pipeline(
     image_path: &Path,
     det_model: &DetectionModel,

@@ -1,0 +1,46 @@
+.md-header__inner.md-grid {
+  max-width: none;
+}
+
+/* Default primary nav is 12.1rem — too wide for two short labels. */
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--primary {
+    width: 9rem;
+  }
+
+  [dir="ltr"] .md-sidebar--primary .md-sidebar__inner {
+    padding-right: calc(100% - 8.4rem);
+  }
+
+  [dir="rtl"] .md-sidebar--primary .md-sidebar__inner {
+    padding-left: calc(100% - 8.4rem);
+  }
+}
+
+.hires-frame-wrap {
+  margin: 0.5rem 0 1.5rem;
+}
+
+.hires-frame {
+  display: block;
+  width: 100%;
+  height: min(80vh, 720px);
+  border: 0;
+  border-radius: 0.25rem;
+  background: #1b1b1f;
+}
+
+@media screen and (max-width: 44.984375em) {
+  .hires-frame-wrap {
+    margin-left: -0.8rem;
+    margin-right: -0.8rem;
+  }
+
+  .hires-frame {
+    width: 100vw;
+    max-width: 100vw;
+    height: calc(100dvh - 7.5rem);
+    min-height: 24rem;
+    border-radius: 0;
+  }
+}
