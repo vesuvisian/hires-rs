@@ -40,12 +40,12 @@ jobs:
       - name: Build WebGPU wasm
         run: |
           wasm-pack build web --release --target web --out-dir "$PWD/docs/app/pkg-wgpu" \
-            -- --no-default-features --features wgpu
+            -- --no-default-features --features wgpu,native-models
 
       - name: Build Flex wasm
         run: |
           wasm-pack build web --release --target web --out-dir "$PWD/docs/app/pkg-flex" \
-            -- --no-default-features --features flex
+            -- --no-default-features --features flex,native-models
 
       - name: Stage iframe app and weights
         run: bash web/stage.sh
@@ -55,7 +55,7 @@ jobs:
           det=docs/app/weights/detection/best.bpk
           seg=docs/app/weights/segmentation/efficientnet-b2_best.bpk
           if [[ ! -f "$det" || ! -f "$seg" ]]; then
-            echo "::error::Burnpack weights missing. Commit weights/*.bpk (each under 100MB) or download them into docs/app/weights/ from a GitHub Release before zensical build."
+            echo "::error::Native burnpack weights missing. Commit weights/*.bpk (each under 100MB) or download them into docs/app/weights/ from a GitHub Release before zensical build."
             exit 1
           fi
           python3 - <<'PY'

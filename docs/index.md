@@ -17,7 +17,7 @@ This is a work in progress and still needs further refinement.
 - Wait until the status line says **Ready**. The first run downloads the model weights (tens of MB) and may stall while shaders compile.
 - **Upload** or drop a photo of a resistor.
 - Optionally enable **Band overlay** to blend inferred color-code classes onto each detection.
-- Raise **Conf** if you see false positive bounding box detections. The default matches the CLI (`0.001`).
+- Raise **Conf** if you see false positive bounding box detections. The default matches the CLI (`0.01`).
 
 <div class="hires-frame-wrap" markdown="0">
   <iframe

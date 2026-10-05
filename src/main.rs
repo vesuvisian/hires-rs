@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
+use hires_rs::detection::DET_WEIGHTS_DEFAULT;
 use hires_rs::detection::model::Model as DetectionModel;
 use hires_rs::pipeline::{PipelineArgs, collect_inputs, run_pipeline};
 use hires_rs::resolve_device;
+use hires_rs::segmentation::SEG_WEIGHTS_DEFAULT;
 use hires_rs::segmentation::model::Model as SegmentationModel;
 
 #[derive(Parser, Debug)]
@@ -18,11 +20,11 @@ struct Cli {
     input: PathBuf,
 
     /// Detection burnpack weights
-    #[arg(long, default_value = "weights/detection/best.bpk")]
+    #[arg(long, default_value = DET_WEIGHTS_DEFAULT)]
     det_weights: PathBuf,
 
     /// Segmentation burnpack weights
-    #[arg(long, default_value = "weights/segmentation/efficientnet-b2_best.bpk")]
+    #[arg(long, default_value = SEG_WEIGHTS_DEFAULT)]
     seg_weights: PathBuf,
 
     /// Output directory for composites and results.txt
@@ -33,7 +35,7 @@ struct Cli {
     #[arg(long, default_value_t = 512)]
     size: usize,
 
-    /// Minimum YOLO detection confidence (ONNX scores run lower than HiRes .pt)
+    /// Minimum YOLO detection confidence (native default 0.01; ONNX backup 0.001)
     #[arg(long, default_value_t = hires_rs::detection::DEFAULT_CONF_THRESH)]
     det_conf: f32,
 }

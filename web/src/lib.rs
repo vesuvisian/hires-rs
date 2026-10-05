@@ -1,12 +1,12 @@
 #![recursion_limit = "512"]
 
 use burn::tensor::{AllocationProperty, Bytes};
+use hires_rs::Device;
 use hires_rs::detection::model::Model as DetectionModel;
 use hires_rs::image_io::load_rgb_from_memory;
 use hires_rs::pipeline::{ProcessOptions, process_rgb_with_async};
-use hires_rs::segmentation::model::Model as SegmentationModel;
 use hires_rs::segmentation::VIS_COLORS;
-use hires_rs::Device;
+use hires_rs::segmentation::model::Model as SegmentationModel;
 use image::RgbImage;
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use wasm_bindgen::prelude::*;
@@ -181,8 +181,7 @@ impl HiresApp {
         }
         let img = rgba_to_rgb(width, height, rgba)?;
         let opts = process_opts(det_conf, band_overlay);
-        let results =
-            process_rgb_with_async(&img, det, seg, &self.device, SEG_SIZE, opts).await;
+        let results = process_rgb_with_async(&img, det, seg, &self.device, SEG_SIZE, opts).await;
         detections_to_js(&results, band_overlay)
     }
 }

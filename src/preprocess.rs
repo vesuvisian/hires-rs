@@ -12,6 +12,15 @@ use crate::detection::LetterboxMeta;
 use crate::image_io::with_resizer;
 use crate::segmentation::{IMAGENET_MEAN, IMAGENET_STD, PadInfo};
 
+/// Detection letterbox policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LetterboxMode {
+    /// Pad to a fixed `size×size` square (ONNX export / burn-onnx graphs).
+    Square,
+    /// Ultralytics predict: pad only to a multiple of `stride` (HiRes `.pt` path).
+    Auto { stride: u32 },
+}
+
 /// Ensure `buf` has length `need` without zero-filling when capacity already covers it.
 /// Caller must overwrite every element before reading.
 fn ensure_chw_len(buf: &mut Vec<f32>, need: usize) {
@@ -28,7 +37,8 @@ fn ensure_chw_len(buf: &mut Vec<f32>, need: usize) {
 }
 
 pub struct DetScratch {
-    size: u32,
+    canvas_w: u32,
+    canvas_h: u32,
     canvas: Vec<u8>,
     resized: Vec<u8>,
     /// Ping-pong slots so H2D can take ownership of one while the other is packed next.
@@ -37,14 +47,15 @@ pub struct DetScratch {
 }
 
 impl DetScratch {
-    fn with_size(size: u32) -> Self {
-        let n = (size as usize) * (size as usize) * 3;
+    fn with_dims(canvas_w: u32, canvas_h: u32) -> Self {
+        let n = (canvas_w as usize) * (canvas_h as usize) * 3;
         let mut a = Vec::with_capacity(n);
         let mut b = Vec::with_capacity(n);
         ensure_chw_len(&mut a, n);
         ensure_chw_len(&mut b, n);
         Self {
-            size,
+            canvas_w,
+            canvas_h,
             canvas: vec![114; n],
             resized: Vec::new(),
             chw: [a, b],
@@ -52,18 +63,18 @@ impl DetScratch {
         }
     }
 
-    fn ensure(&mut self, size: u32) {
-        if self.size == size {
+    fn ensure(&mut self, canvas_w: u32, canvas_h: u32) {
+        if self.canvas_w == canvas_w && self.canvas_h == canvas_h {
             return;
         }
-        *self = Self::with_size(size);
+        *self = Self::with_dims(canvas_w, canvas_h);
     }
 
-    fn pack_take_chw(&mut self, size: usize, normalize: bool) -> Vec<f32> {
-        let need = size * size * 3;
+    fn pack_take_chw(&mut self, w: usize, h: usize, normalize: bool) -> Vec<f32> {
+        let need = w * h * 3;
         let i = self.chw_idx;
         ensure_chw_len(&mut self.chw[i], need);
-        pack_rgb_to_chw(&self.canvas, &mut self.chw[i], size, size, normalize);
+        pack_rgb_to_chw(&self.canvas, &mut self.chw[i], w, h, normalize);
         let packed = std::mem::take(&mut self.chw[i]);
         self.chw_idx ^= 1;
         // Warm the alternate slot for the next frame (no zero-fill).
@@ -106,7 +117,7 @@ impl SegScratch {
 }
 
 thread_local! {
-    static DET_SCRATCH: RefCell<DetScratch> = RefCell::new(DetScratch::with_size(640));
+    static DET_SCRATCH: RefCell<DetScratch> = RefCell::new(DetScratch::with_dims(640, 640));
     static SEG_SCRATCH: RefCell<SegScratch> = RefCell::new(SegScratch::with_size(512));
 }
 
@@ -335,36 +346,84 @@ fn paste_rect(
     }
 }
 
-/// Letterbox to square and upload as NCHW float `[0,1]` (pad = 114/255).
+/// Compute Ultralytics letterbox geometry for a max side `size`.
+///
+/// - [`LetterboxMode::Square`]: pad to `size×size` (ONNX export).
+/// - [`LetterboxMode::Auto`]: pad only to a multiple of `stride` (HiRes / Ultralytics predict).
+pub fn letterbox_geometry(
+    orig_w: u32,
+    orig_h: u32,
+    size: u32,
+    mode: LetterboxMode,
+) -> (u32, u32, u32, u32, f32, f32, f32) {
+    let size_f = size as f32;
+    let scale = (size_f / orig_w as f32).min(size_f / orig_h as f32);
+    let new_w = (orig_w as f32 * scale).round().max(1.0) as u32;
+    let new_h = (orig_h as f32 * scale).round().max(1.0) as u32;
+
+    let (pad_w_total, pad_h_total) = match mode {
+        LetterboxMode::Square => ((size - new_w) as f32, (size - new_h) as f32),
+        LetterboxMode::Auto { stride } => {
+            let stride = stride.max(1) as f32;
+            // Ultralytics: dw, dh = (target - unpadded) % stride
+            let dw = (size - new_w) as f32 % stride;
+            let dh = (size - new_h) as f32 % stride;
+            // Guard float mod quirks (should already be exact for integer sizes).
+            let dw = if dw < 0.0 { dw + stride } else { dw };
+            let dh = if dh < 0.0 { dh + stride } else { dh };
+            (dw, dh)
+        }
+    };
+
+    // Centered pad; Ultralytics uses round(d/2 ± 0.1) for top/bottom split.
+    let pad_x = pad_w_total / 2.0;
+    let pad_y = pad_h_total / 2.0;
+    let left = (pad_x - 0.1).round().max(0.0) as u32;
+    let right = (pad_x + 0.1).round().max(0.0) as u32;
+    let top = (pad_y - 0.1).round().max(0.0) as u32;
+    let bottom = (pad_y + 0.1).round().max(0.0) as u32;
+    let canvas_w = new_w + left + right;
+    let canvas_h = new_h + top + bottom;
+    (
+        canvas_w,
+        canvas_h,
+        new_w,
+        new_h,
+        scale,
+        left as f32,
+        top as f32,
+    )
+}
+
+/// Letterbox and upload as NCHW float `[0,1]` (pad = 114/255).
 pub fn letterbox_to_tensor(
     img: &RgbImage,
     size: u32,
+    mode: LetterboxMode,
     device: &Device,
 ) -> (Tensor<4>, LetterboxMeta) {
     DET_SCRATCH.with(|cell| {
         let mut sp = cell.borrow_mut();
         let sp = &mut *sp;
-        sp.ensure(size);
         let (orig_w, orig_h) = img.dimensions();
-        let scale = (size as f32 / orig_w as f32).min(size as f32 / orig_h as f32);
-        let new_w = (orig_w as f32 * scale).round().max(1.0) as u32;
-        let new_h = (orig_h as f32 * scale).round().max(1.0) as u32;
-        let pad_x = (size - new_w) as f32 / 2.0;
-        let pad_y = (size - new_h) as f32 / 2.0;
-        let ox = pad_x.floor() as usize;
-        let oy = pad_y.floor() as usize;
+        let (canvas_w, canvas_h, new_w, new_h, scale, pad_x, pad_y) =
+            letterbox_geometry(orig_w, orig_h, size, mode);
+        sp.ensure(canvas_w, canvas_h);
 
+        let ox = pad_x as usize;
+        let oy = pad_y as usize;
         let need = (new_w as usize) * (new_h as usize) * 3;
         if sp.resized.len() != need {
             sp.resized.resize(need, 0);
         }
         resize_rgb_into(img, &mut sp.resized, new_w, new_h);
 
-        let size_usize = size as usize;
+        let cw = canvas_w as usize;
+        let ch = canvas_h as usize;
         fill_pad_border(
             &mut sp.canvas,
-            size_usize,
-            size_usize,
+            cw,
+            ch,
             new_w as usize,
             new_h as usize,
             ox,
@@ -374,14 +433,14 @@ pub fn letterbox_to_tensor(
         paste_rect(
             &mut sp.canvas,
             &sp.resized,
-            size_usize,
+            cw,
             new_w as usize,
             new_h as usize,
             ox,
             oy,
         );
-        let chw = sp.pack_take_chw(size_usize, false);
-        let td = TensorData::new(chw, [1, 3, size_usize, size_usize]);
+        let chw = sp.pack_take_chw(cw, ch, false);
+        let td = TensorData::new(chw, [1, 3, ch, cw]);
         let tensor = Tensor::<4>::from_data(td, device);
         let meta = LetterboxMeta {
             scale,

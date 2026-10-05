@@ -1,5 +1,10 @@
 #![recursion_limit = "512"]
 
+#[cfg(all(feature = "onnx-models", feature = "native-models"))]
+compile_error!("Enable only one of: onnx-models, native-models");
+#[cfg(not(any(feature = "onnx-models", feature = "native-models")))]
+compile_error!("Enable one of: onnx-models, native-models");
+
 pub mod band;
 pub mod detection;
 pub mod image_io;

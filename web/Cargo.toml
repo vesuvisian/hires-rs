@@ -12,7 +12,9 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [features]
-default = ["wgpu"]
+default = ["wgpu", "native-models"]
+onnx-models = ["hires-rs/onnx-models"]
+native-models = ["hires-rs/native-models"]
 # Pin CubeCL to the WebGPU/WGSL compiler (not Auto/Metal/Vulkan).
 wgpu = ["hires-rs/webgpu", "burn/webgpu"]
 flex = ["hires-rs/flex"]

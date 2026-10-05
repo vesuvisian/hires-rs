@@ -226,8 +226,7 @@ pub async fn process_rgb_with_async(
     opts: ProcessOptions,
 ) -> Vec<AnnotatedDetection> {
     let (img_w, img_h) = img.dimensions();
-    let dets =
-        detection::detect_resistors_with_async(det_model, img, device, opts.det_conf).await;
+    let dets = detection::detect_resistors_with_async(det_model, img, device, opts.det_conf).await;
     if dets.is_empty() {
         return Vec::new();
     }

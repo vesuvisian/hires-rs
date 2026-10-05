@@ -20,7 +20,9 @@ burn = { version = "0.22.0-pre.4", default-features = false, features = ["std"] 
 gst-plugin-version-helper = "0.8.4"
 
 [features]
-default = ["wgpu"]
+default = ["wgpu", "native-models"]
+onnx-models = ["hires-rs/onnx-models"]
+native-models = ["hires-rs/native-models"]
 wgpu = ["hires-rs/wgpu"]
 flex = ["hires-rs/flex"]
 metal = ["hires-rs/metal"]

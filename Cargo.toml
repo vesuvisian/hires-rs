@@ -10,8 +10,10 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [features]
-default = ["wgpu", "cli"]
+default = ["wgpu", "cli", "native-models"]
 cli = ["dep:clap", "dep:walkdir"]
+onnx-models = []
+native-models = []
 wgpu = ["burn/wgpu"]
 # Pins CubeCL to WGSL; implies `wgpu` so `resolve_device` / cfg gates still fire.
 webgpu = ["wgpu", "burn/webgpu"]
@@ -45,6 +47,7 @@ members = [
     ".",
     "plugins/hires",
     "web",
+    "tools/convert-weights",
 ]
 
 [workspace.package]

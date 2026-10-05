@@ -1,0 +1,18 @@
+[package]
+name = "convert-weights"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish = false
+repository.workspace = true
+
+[[bin]]
+name = "convert-weights"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+hires-rs = { path = "../..", default-features = false, features = ["native-models", "flex"] }
+burn = { version = "0.22.0-pre.4", default-features = false, features = ["std", "flex"] }
+burn-store = { version = "0.22.0-pre.4", default-features = false, features = ["std", "pytorch"] }

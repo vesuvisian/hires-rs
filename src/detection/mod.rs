@@ -1,9 +1,21 @@
-pub mod model;
+#[cfg(feature = "native-models")]
+pub mod native;
+#[cfg(feature = "onnx-models")]
+pub mod onnx;
+
+pub mod model {
+    #[cfg(feature = "native-models")]
+    pub use super::native::Model;
+    #[cfg(feature = "onnx-models")]
+    pub use super::onnx::Model;
+}
 
 use burn::prelude::*;
 use image::RgbImage;
 
-use crate::preprocess::letterbox_to_tensor;
+use crate::preprocess::{letterbox_geometry, letterbox_to_tensor};
+
+pub use crate::preprocess::LetterboxMode;
 
 #[derive(Clone, Debug)]
 pub struct Detection {
@@ -24,30 +36,68 @@ pub struct LetterboxMeta {
 }
 
 pub const DET_SIZE: u32 = 640;
+pub const DET_STRIDE: u32 = 32;
+
+#[cfg(feature = "onnx-models")]
+pub const DET_LETTERBOX_MODE: LetterboxMode = LetterboxMode::Square;
+#[cfg(feature = "native-models")]
+pub const DET_LETTERBOX_MODE: LetterboxMode = LetterboxMode::Auto { stride: DET_STRIDE };
+
+#[cfg(feature = "onnx-models")]
+pub const DET_WEIGHTS_DEFAULT: &str = "weights/detection/best.onnx.bpk";
+#[cfg(feature = "native-models")]
+pub const DET_WEIGHTS_DEFAULT: &str = "weights/detection/best.bpk";
+
 /// Default YOLO confidence gate.
 ///
-/// ONNX-exported YOLOv8 scores run lower than Ultralytics `.pt` (HiRes uses
-/// `conf=0.01` on `.pt`; ONNX/Burn true positives often land around 0.006–0.009),
-/// so the library default stays low. Raise it (e.g. `0.005`–`0.01`) to cut
-/// false positives on live video.
+/// Ultralytics `.pt` uses `conf=0.01` with auto letterbox. ONNX is locked to
+/// square 640 and scores lower (≈0.006–0.009), so its default stays `0.001`.
+/// Native uses the same auto letterbox as HiRes and can use a higher gate.
+#[cfg(feature = "onnx-models")]
 pub const DEFAULT_CONF_THRESH: f32 = 0.001;
+#[cfg(feature = "native-models")]
+pub const DEFAULT_CONF_THRESH: f32 = 0.01;
 const NMS_TOP_K: usize = 100;
 
-/// Ultralytics-style letterbox to square canvas with gray (114) padding.
+#[cfg(test)]
+mod letterbox_tests {
+    use super::*;
+    use crate::preprocess::letterbox_geometry;
+
+    #[test]
+    fn auto_letterbox_matches_ultralytics_1280x720() {
+        let (cw, ch, nw, nh, scale, pad_x, pad_y) =
+            letterbox_geometry(1280, 720, 640, LetterboxMode::Auto { stride: 32 });
+        assert!((scale - 0.5).abs() < 1e-6);
+        assert_eq!((nw, nh), (640, 360));
+        assert_eq!((cw, ch), (640, 384));
+        assert_eq!((pad_x, pad_y), (0.0, 12.0));
+    }
+
+    #[test]
+    fn square_letterbox_is_640() {
+        let (cw, ch, nw, nh, _, pad_x, pad_y) =
+            letterbox_geometry(1280, 720, 640, LetterboxMode::Square);
+        assert_eq!((nw, nh), (640, 360));
+        assert_eq!((cw, ch), (640, 640));
+        assert_eq!((pad_x, pad_y), (0.0, 140.0));
+    }
+}
+
+/// Letterbox with gray (114) padding using [`DET_LETTERBOX_MODE`].
 /// Prefer [`detect_resistors`] which fuses letterbox into the tensor path.
 pub fn letterbox(img: &RgbImage, size: u32) -> (RgbImage, LetterboxMeta) {
-    let (orig_w, orig_h) = img.dimensions();
-    let scale = (size as f32 / orig_w as f32).min(size as f32 / orig_h as f32);
-    let new_w = (orig_w as f32 * scale).round().max(1.0) as u32;
-    let new_h = (orig_h as f32 * scale).round().max(1.0) as u32;
-    let resized = crate::image_io::resize_rgb_bilinear(img, new_w, new_h);
+    letterbox_with(img, size, DET_LETTERBOX_MODE)
+}
 
-    let pad_x = (size - new_w) as f32 / 2.0;
-    let pad_y = (size - new_h) as f32 / 2.0;
-    let mut canvas = image::RgbImage::from_pixel(size, size, image::Rgb([114, 114, 114]));
-    let ox = pad_x.floor() as u32;
-    let oy = pad_y.floor() as u32;
-    image::imageops::replace(&mut canvas, &resized, ox as i64, oy as i64);
+/// Letterbox with an explicit mode (for tests / tooling).
+pub fn letterbox_with(img: &RgbImage, size: u32, mode: LetterboxMode) -> (RgbImage, LetterboxMeta) {
+    let (orig_w, orig_h) = img.dimensions();
+    let (canvas_w, canvas_h, new_w, new_h, scale, pad_x, pad_y) =
+        letterbox_geometry(orig_w, orig_h, size, mode);
+    let resized = crate::image_io::resize_rgb_bilinear(img, new_w, new_h);
+    let mut canvas = image::RgbImage::from_pixel(canvas_w, canvas_h, image::Rgb([114, 114, 114]));
+    image::imageops::replace(&mut canvas, &resized, pad_x as i64, pad_y as i64);
 
     (
         canvas,
@@ -87,7 +137,11 @@ pub async fn decode_yolo_async(
     let conf = pred.clone().slice(s![4..5, ..]).squeeze_dim::<1>(0); // [N]
     let boxes = pred.slice(s![0..4, ..]).swap_dims(0, 1); // [N, 4] cx,cy,w,h
 
-    let idx2d = conf.clone().greater_elem(conf_thresh).argwhere_async().await; // [K, 1]
+    let idx2d = conf
+        .clone()
+        .greater_elem(conf_thresh)
+        .argwhere_async()
+        .await; // [K, 1]
     let k = idx2d.dims()[0];
     if k == 0 {
         return Vec::new();
@@ -129,7 +183,7 @@ fn detections_from_xywh(
         let bw = box_vals[i * 4 + 2];
         let bh = box_vals[i * 4 + 3];
         let conf = conf_vals[i];
-        if !(conf > conf_thresh) {
+        if conf <= conf_thresh {
             continue;
         }
         // xywh in letterboxed space → xyxy
@@ -232,12 +286,7 @@ pub fn detect_resistors_with(
         panic!("detect_resistors_with is sync; use detect_resistors_with_async on wasm");
     }
     #[cfg(not(target_arch = "wasm32"))]
-    pollster::block_on(detect_resistors_with_async(
-        model,
-        img,
-        device,
-        conf_thresh,
-    ))
+    pollster::block_on(detect_resistors_with_async(model, img, device, conf_thresh))
 }
 
 pub async fn detect_resistors_with_async(
@@ -246,11 +295,9 @@ pub async fn detect_resistors_with_async(
     device: &Device,
     conf_thresh: f32,
 ) -> Vec<Detection> {
-    let (input, meta) = letterbox_to_tensor(img, DET_SIZE, device);
+    let (input, meta) = letterbox_to_tensor(img, DET_SIZE, DET_LETTERBOX_MODE, device);
     let output = model.forward(input);
     let raw = decode_yolo_async(output, &meta, conf_thresh).await;
     let keep = nms(&raw, 0.5);
     keep.into_iter().map(|i| raw[i].clone()).collect()
 }
-
-

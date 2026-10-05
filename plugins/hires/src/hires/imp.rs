@@ -22,9 +22,10 @@ use crate::weights::{DET_WEIGHTS, SEG_WEIGHTS};
 
 const DEFAULT_SIZE: u32 = 512;
 const DEFAULT_BAND_OVERLAY: bool = false;
-/// Higher than the library default (`0.001`) to cut live-video false positives.
-/// HiRes uses `0.01` on Ultralytics `.pt`; ONNX scores run lower, so `0.008`
-/// is a practical middle ground. Raise toward `0.01` if still too noisy.
+/// Live-video default matches the active architecture feature.
+#[cfg(feature = "native-models")]
+const DEFAULT_CONFIDENCE: f32 = 0.01;
+#[cfg(feature = "onnx-models")]
 const DEFAULT_CONFIDENCE: f32 = 0.008;
 
 static CAT: LazyLock<gst::DebugCategory> = LazyLock::new(|| {
@@ -93,7 +94,7 @@ impl ObjectImpl for Hires {
                     .nick("Detection Confidence")
                     .blurb(
                         "Minimum YOLO detection confidence (0–1). Raise to reduce false positives; \
-                         HiRes uses 0.01 on .pt weights, ONNX scores are typically lower.",
+                         Native models match HiRes at 0.01; ONNX backup scores are typically lower.",
                     )
                     .minimum(0.0)
                     .maximum(1.0)

@@ -14,9 +14,12 @@ photo → YOLOv8n boxes → crop (+10%) → UNet++ mask → PCA bands → color-
 
 ## Detection
 
-YOLOv8n is a single-class body detector. The image is **letterboxed** to 640×640: scaled so the long edge fits, bilinearly resized, then centered on a gray canvas (`114/255`). Aspect ratio is preserved so boxes map back with a uniform scale and pad.
+YOLOv8n is a single-class body detector. The image is scaled so the long edge fits a 640 max side, bilinearly resized, then centered on a gray canvas (`114/255`):
 
-The network outputs `(1, 5, 8400)` — four box channels (`cx, cy, w, h` in letterbox space) plus objectness. Candidates below the confidence gate are dropped on-device, then:
+- **Native** (`native-models`, default): Ultralytics **auto** letterbox — pad only until `H` and `W` are multiples of stride 32 (e.g. 1280×720 → 640×384). Anchor count follows the feature maps.
+- **ONNX** (`onnx-models`, backup): pad to a fixed **640×640** square (export shape). Output length is `8400` anchors.
+
+Aspect ratio is preserved so boxes map back with a uniform scale and pad. Candidates below the confidence gate are dropped on-device, then:
 
 1. Convert xywh to xyxy and **undo letterbox** (subtract pad, divide by scale, clamp to the original image).
 2. Keep at most 100 highest-scoring boxes.
@@ -24,7 +27,7 @@ The network outputs `(1, 5, 8400)` — four box channels (`cx, cy, w, h` in lett
 
 Each surviving box is expanded by **10%** on every side (clamped to the image) so bands near the body edge are not clipped. Crops smaller than 30 px on the short side are discarded.
 
-ONNX/Burn scores run lower than Ultralytics `.pt` (HiRes uses `conf=0.01` on `.pt`; true positives here often sit around 0.006–0.009). The library, CLI, and demo default is therefore `0.001`. Raise **Conf** if you see false boxes (the GStreamer element defaults higher for live video).
+Native matches HiRes auto letterbox and defaults to `conf=0.01`. ONNX square letterbox scores lower (≈0.006–0.009), so that backup path defaults to `0.001`. Raise **Conf** if you see false boxes (the GStreamer element exposes `confidence` for live video).
 
 ## Segmentation
 
@@ -88,9 +91,9 @@ Burn backends are compile-time exclusive. The site ships two wasm packs:
 - **wgpu** — used when `navigator.gpu` is present (Chrome, Edge, recent Firefox/Safari). The wasm crate enables `burn/webgpu` so CubeCL targets **browser WebGPU**.
 - **flex** — CPU fallback; still images only, often tens of seconds per photo
 
-Default CLI `wgpu` is not that stack. On macOS it still talks to the GPU through **wgpu’s Metal HAL**, but CubeCL emits **WGSL** (`wgpu<wgsl>`) unless you build `--features metal` (native CubeCL MSL). The demo’s WGSL is compiled by the **browser**, not by native wgpu/Naga. Letterbox, NMS, the `0.001` gate, and the rest of the cascade are the same Rust; the kernels are not bit-identical.
+Default CLI `wgpu` is not that stack. On macOS it still talks to the GPU through **wgpu’s Metal HAL**, but CubeCL emits **WGSL** (`wgpu<wgsl>`) unless you build `--features metal` (native CubeCL MSL). The demo’s WGSL is compiled by the **browser**, not by native wgpu/Naga. Letterbox, NMS, and the rest of the cascade are the same Rust; the kernels are not bit-identical.
 
-ONNX/Burn objectness already sits just above the floor (true positives often **0.006–0.009**), so a small backend drift can drop the body box under `0.001` while weaker proposals remain. NMS then has nothing large to suppress those leftover boxes. Raising **Conf** cannot recover a peak the GPU never produced; lowering it only adds more noise. Flex CPU is a third numeric path.
+On the ONNX backup path, objectness often sits just above the floor (**0.006–0.009**), so a small backend drift can drop the body box under `0.001` while weaker proposals remain. Native’s higher default gate (`0.01`) assumes auto letterbox; if a peak disappears on one GPU path, lowering **Conf** only adds noise. Flex CPU is a third numeric path.
 
 Other CLI vs demo differences:
 
@@ -107,4 +110,6 @@ weights/detection/best.bpk
 weights/segmentation/efficientnet-b2_best.bpk
 ```
 
-Models are generated Burn modules from the HiRes ONNX exports; architectures are not hand-written.
+`bash web/stage.sh` stages those native packs by default. `HIRES_ONNX=1` stages the `*.onnx.bpk` backup packs instead (and the wasm build must use `--features onnx-models`; point `demo.js` at the `.onnx.bpk` paths).
+
+Default builds use hand-written YOLOv8n + SMP UNet++ (`native-models`) loaded from plain `*.bpk` (from original `.pt`). `onnx-models` is an exclusive backup that uses generated graphs from the HiRes ONNX exports (`*.onnx.bpk`).

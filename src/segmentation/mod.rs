@@ -1,4 +1,19 @@
-pub mod model;
+#[cfg(feature = "native-models")]
+pub mod native;
+#[cfg(feature = "onnx-models")]
+pub mod onnx;
+
+pub mod model {
+    #[cfg(feature = "native-models")]
+    pub use super::native::Model;
+    #[cfg(feature = "onnx-models")]
+    pub use super::onnx::Model;
+}
+
+#[cfg(feature = "onnx-models")]
+pub const SEG_WEIGHTS_DEFAULT: &str = "weights/segmentation/efficientnet-b2_best.onnx.bpk";
+#[cfg(feature = "native-models")]
+pub const SEG_WEIGHTS_DEFAULT: &str = "weights/segmentation/efficientnet-b2_best.bpk";
 
 use burn::prelude::*;
 use burn::tensor::activation::softmax;
