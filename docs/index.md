@@ -10,7 +10,7 @@ Identify through-hole resistor values in the browser using the [*HiRes*](https:/
 
 See [how it works](how-it-works.md), or the [repo](https://github.com/vesuvisian/hires-rs) for the CLI tool and GStreamer plugin.
 
-This is a work in progress and still needs further refinement.
+This is a work in progress and still needs further refinement. The in-browser demo is much slower than the native CLI (often several seconds per photo on WebGPU); use `hires-rs` locally when you care about speed.
 
 ## How to use
 

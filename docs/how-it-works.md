@@ -91,7 +91,7 @@ Burn backends are compile-time exclusive. The site ships two wasm packs:
 - **wgpu** — used when `navigator.gpu` is present (Chrome, Edge, recent Firefox/Safari). The wasm crate enables `burn/webgpu` so CubeCL targets **browser WebGPU**.
 - **flex** — CPU fallback; still images only, often tens of seconds per photo
 
-Default CLI `wgpu` is not that stack. On macOS it still talks to the GPU through **wgpu’s Metal HAL**, but CubeCL emits **WGSL** (`wgpu<wgsl>`) unless you build `--features metal` (native CubeCL MSL). The demo’s WGSL is compiled by the **browser**, not by native wgpu/Naga. Letterbox, NMS, and the rest of the cascade are the same Rust; the kernels are not bit-identical.
+Default CLI `wgpu` is not that stack. On macOS it still talks to the GPU through **wgpu’s Metal HAL**, but CubeCL emits **WGSL** (`wgpu<wgsl>`) unless you build `--features metal` (native CubeCL MSL). The demo’s WGSL is compiled by the **browser**, not by native wgpu/Naga. Letterbox, NMS, and the rest of the cascade are the same Rust; the kernels are not bit-identical. In practice the native CLI is much faster than this page’s WebGPU path (often ~1–2 s vs several seconds per image on the same machine).
 
 On the ONNX backup path, objectness often sits just above the floor (**0.006–0.009**), so a small backend drift can drop the body box under `0.001` while weaker proposals remain. Native’s higher default gate (`0.01`) assumes auto letterbox; if a peak disappears on one GPU path, lowering **Conf** only adds noise. Flex CPU is a third numeric path.
 

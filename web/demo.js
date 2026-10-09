@@ -241,6 +241,13 @@ function showMeta(dets, ms) {
   metaEl.textContent = `${n} detection${n === 1 ? "" : "s"} · conf≥${conf().toFixed(3)} · det=[${scores || "—"}] · ${ms} ms · ${backend}`;
 }
 
+/** Yield until after the next paint so the canvas is visible before long infer. */
+function paintFrame() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
 async function runOnCanvas() {
   if (!app || !canInfer()) return;
   if (lastDets && (!bandsEl.checked || detsHaveMasks(lastDets))) {
@@ -268,6 +275,7 @@ async function ingestFile(file) {
   lastDets = null;
   lastRgba = null;
   useWasmImage = false;
+  metaEl.textContent = "";
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   let displayData = null;
@@ -288,19 +296,23 @@ async function ingestFile(file) {
     useWasmImage = false;
   }
 
-  // Infer before awaiting createImageBitmap so we never yield with a loaded
-  // image while another ingest can replace `app.image`.
+  // Show the image immediately; `enqueue` still serializes ingest so a concurrent
+  // load cannot replace `app.image` while we await paint / infer.
   if (useWasmImage) {
-    await runOnCanvas();
     lastBitmap = await createImageBitmap(displayData);
-    redrawDets(lastDets);
   } else {
     lastBitmap = await bitmapFromFile(file);
     lastNativeW = lastBitmap.width;
     lastNativeH = lastBitmap.height;
     lastRgba = rgbaFromBitmap(lastBitmap);
-    drawImageToFit(lastBitmap);
+  }
+  drawImageToFit(lastBitmap);
+  setStatus(`Inferring (${backend})…`);
+  await paintFrame();
+  try {
     await runOnCanvas();
+  } finally {
+    setStatus(`Ready (${backend}).`);
   }
 }
 
