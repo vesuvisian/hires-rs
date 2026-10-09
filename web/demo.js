@@ -127,16 +127,43 @@ function viewScale() {
   };
 }
 
+function fitSize(w, h) {
+  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  return {
+    dw: Math.max(1, Math.round(w * scale)),
+    dh: Math.max(1, Math.round(h * scale)),
+  };
+}
+
 function drawImageToFit(source) {
   const w = source.width;
   const h = source.height;
   if (!w || !h) return;
-  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
-  const dw = Math.max(1, Math.round(w * scale));
-  const dh = Math.max(1, Math.round(h * scale));
+  const { dw, dh } = fitSize(w, h);
   canvas.width = dw;
   canvas.height = dh;
   ctx.drawImage(source, 0, 0, dw, dh);
+}
+
+/** Sync paint from ImageData (avoids waiting on createImageBitmap for first frame). */
+function drawImageDataToFit(imageData) {
+  const w = imageData.width;
+  const h = imageData.height;
+  if (!w || !h) return;
+  const { dw, dh } = fitSize(w, h);
+  canvas.width = dw;
+  canvas.height = dh;
+  if (dw === w && dh === h) {
+    ctx.putImageData(imageData, 0, 0);
+    return;
+  }
+  const tmp = document.createElement("canvas");
+  tmp.width = w;
+  tmp.height = h;
+  const tctx =
+    tmp.getContext("2d", { colorSpace: "srgb" }) || tmp.getContext("2d");
+  tctx.putImageData(imageData, 0, 0);
+  ctx.drawImage(tmp, 0, 0, dw, dh);
 }
 
 function rgbaFromBitmap(bitmap) {
@@ -241,10 +268,16 @@ function showMeta(dets, ms) {
   metaEl.textContent = `${n} detection${n === 1 ? "" : "s"} · conf≥${conf().toFixed(3)} · det=[${scores || "—"}] · ${ms} ms · ${backend}`;
 }
 
-/** Yield until after the next paint so the canvas is visible before long infer. */
+/**
+ * Yield until the browser can present the canvas. Double-rAF alone is not
+ * enough inside the docs iframe: wasm/WebGPU often re-enters the main thread
+ * before the compositor flushes. A macrotask after rAF fixes Pages.
+ */
 function paintFrame() {
   return new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(resolve));
+    requestAnimationFrame(() => {
+      setTimeout(resolve, 0);
+    });
   });
 }
 
@@ -296,19 +329,22 @@ async function ingestFile(file) {
     useWasmImage = false;
   }
 
-  // Show the image immediately; `enqueue` still serializes ingest so a concurrent
-  // load cannot replace `app.image` while we await paint / infer.
+  // Paint first, then infer. `enqueue` still serializes so a concurrent load
+  // cannot replace `app.image` while we await paint / infer.
   if (useWasmImage) {
+    drawImageDataToFit(displayData);
+    setStatus(`Inferring (${backend})…`);
+    await paintFrame();
     lastBitmap = await createImageBitmap(displayData);
   } else {
     lastBitmap = await bitmapFromFile(file);
     lastNativeW = lastBitmap.width;
     lastNativeH = lastBitmap.height;
     lastRgba = rgbaFromBitmap(lastBitmap);
+    drawImageToFit(lastBitmap);
+    setStatus(`Inferring (${backend})…`);
+    await paintFrame();
   }
-  drawImageToFit(lastBitmap);
-  setStatus(`Inferring (${backend})…`);
-  await paintFrame();
   try {
     await runOnCanvas();
   } finally {
@@ -330,6 +366,20 @@ async function ingestUrl(url) {
       const blob = await res.blob();
       const name = url.split("/").pop() || "example.jpg";
       const file = new File([blob], name, { type: blob.type || "image/jpeg" });
+      // Paint from the JPEG before wasm decode so the iframe isn't blank.
+      try {
+        hideHint();
+        lastDets = null;
+        metaEl.textContent = "";
+        lastBitmap = await bitmapFromFile(file);
+        lastNativeW = lastBitmap.width;
+        lastNativeH = lastBitmap.height;
+        drawImageToFit(lastBitmap);
+        setStatus(`Inferring (${backend})…`);
+        await paintFrame();
+      } catch (err) {
+        console.warn("example preview failed", err);
+      }
       await ingestFile(file);
       setStatus(`Ready (${backend}).`);
     } catch (err) {
