@@ -149,12 +149,16 @@ impl HiresApp {
             .seg
             .as_ref()
             .ok_or_else(|| js_err("models not loaded"))?;
+        // Clone before any `.await` so a concurrent `load_image` from JS cannot
+        // drop the buffer while the pipeline still holds a reference (wasm-bindgen
+        // does not enforce Rust borrows across the JS event loop).
         let img = self
             .image
             .as_ref()
-            .ok_or_else(|| js_err("no image loaded"))?;
+            .ok_or_else(|| js_err("no image loaded"))?
+            .clone();
         let opts = process_opts(det_conf, band_overlay);
-        let results = process_rgb_with_async(img, det, seg, &self.device, SEG_SIZE, opts).await;
+        let results = process_rgb_with_async(&img, det, seg, &self.device, SEG_SIZE, opts).await;
         detections_to_js(&results, band_overlay)
     }
 

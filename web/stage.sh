@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/docs/app"
 
-mkdir -p "$APP/weights/detection" "$APP/weights/segmentation"
+mkdir -p "$APP/weights/detection" "$APP/weights/segmentation" "$APP/examples"
 cp "$ROOT/web/index.html" "$ROOT/web/demo.js" "$ROOT/web/demo.css" "$APP/"
+cp "$ROOT/web/examples/"*.jpg "$APP/examples/"
 
 # Default: native HiRes-style packs. Set HIRES_ONNX=1 to stage the ONNX backup.
 if [[ "${HIRES_ONNX:-}" == "1" ]]; then

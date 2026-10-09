@@ -6,7 +6,6 @@
 use burn::nn::PaddingConfig2d;
 use burn::nn::conv::{Conv2d, Conv2dConfig};
 use burn::nn::interpolate::{Interpolate2dConfig, InterpolateMode};
-use burn::nn::pool::AdaptiveAvgPool2dConfig;
 use burn::nn::{BatchNorm, BatchNormConfig, Identity};
 use burn::prelude::*;
 use burn::tensor::Bytes;
@@ -134,9 +133,9 @@ impl MBConvBlock {
             y = silu(bn0.forward(expand.forward(y)));
         }
         y = silu(self._bn1.forward(self._depthwise_conv.forward(y)));
-        let se = AdaptiveAvgPool2dConfig::new([1, 1])
-            .init()
-            .forward(y.clone());
+        // Global average pool via mean_dim — avoids CubeCL pool kernels that
+        // fail to compile under browser WebGPU (see SPPF max-pool workaround).
+        let se = y.clone().mean_dim(2).mean_dim(3);
         let se = silu(self._se_reduce.forward(se));
         let se = sigmoid(self._se_expand.forward(se));
         y = y.mul(se);

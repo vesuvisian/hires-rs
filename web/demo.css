@@ -59,6 +59,54 @@ input[type="file"] {
   gap: 0.35rem;
 }
 
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.examples-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-right: 0.15rem;
+}
+
+button.example {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.2rem 0.45rem 0.2rem 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--bg) 70%, #000);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+button.example:hover,
+button.example:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+button.example:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+button.example img {
+  display: block;
+  width: 2.75rem;
+  height: 1.55rem;
+  object-fit: cover;
+  border-radius: 0.15rem;
+  background: #000;
+}
+
 .drop {
   position: relative;
   flex: 1;

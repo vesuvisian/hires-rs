@@ -5,11 +5,11 @@
 use burn::nn::PaddingConfig2d;
 use burn::nn::conv::{Conv2d, Conv2dConfig};
 use burn::nn::interpolate::{Interpolate2dConfig, InterpolateMode};
-use burn::nn::pool::{MaxPool2d, MaxPool2dConfig};
 use burn::nn::{BatchNorm, BatchNormConfig};
 use burn::prelude::*;
 use burn::tensor::Bytes;
 use burn::tensor::activation::{sigmoid, silu, softmax};
+use burn::tensor::ops::PadMode;
 use burn_store::BurnpackStore;
 use burn_store::ModuleSnapshot;
 
@@ -132,11 +132,35 @@ impl C2f {
     }
 }
 
+/// Max-pool 5×5 / stride 1 / pad 2 without Burn's `MaxPool2d`.
+///
+/// CubeCL's `pool2d_direct` WGSL kernel is rejected by browser WebGPU; once that
+/// pipeline is marked invalid, later forwards return garbage detections. Compose
+/// the same windowed max from pad + slice + `max_pair` instead.
+fn max_pool2d_k5_s1_p2(x: Tensor<4>) -> Tensor<4> {
+    let x = x.pad((2, 2, 2, 2), PadMode::Constant(f32::NEG_INFINITY));
+    let [b, c, h, w] = x.dims();
+    let oh = h - 4;
+    let ow = w - 4;
+    let mut out: Option<Tensor<4>> = None;
+    for dy in 0..5usize {
+        for dx in 0..5usize {
+            let window = x
+                .clone()
+                .slice([0..b, 0..c, dy..dy + oh, dx..dx + ow]);
+            out = Some(match out {
+                None => window,
+                Some(prev) => prev.max_pair(window),
+            });
+        }
+    }
+    out.expect("5×5 window")
+}
+
 #[derive(Module, Debug)]
 pub struct Sppf {
     cv1: ConvBnAct,
     cv2: ConvBnAct,
-    m: MaxPool2d,
 }
 
 impl Sppf {
@@ -145,18 +169,14 @@ impl Sppf {
         Self {
             cv1: ConvBnAct::new(c, hidden, 1, 1, device),
             cv2: ConvBnAct::new(hidden * 4, c, 1, 1, device),
-            m: MaxPool2dConfig::new([5, 5])
-                .with_strides([1, 1])
-                .with_padding(PaddingConfig2d::Explicit(2, 2, 2, 2))
-                .init(),
         }
     }
 
     pub fn forward(&self, x: Tensor<4>) -> Tensor<4> {
         let x = self.cv1.forward(x);
-        let y1 = self.m.forward(x.clone());
-        let y2 = self.m.forward(y1.clone());
-        let y3 = self.m.forward(y2.clone());
+        let y1 = max_pool2d_k5_s1_p2(x.clone());
+        let y2 = max_pool2d_k5_s1_p2(y1.clone());
+        let y3 = max_pool2d_k5_s1_p2(y2.clone());
         self.cv2.forward(Tensor::cat(vec![x, y1, y2, y3], 1))
     }
 }

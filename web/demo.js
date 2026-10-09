@@ -16,6 +16,10 @@ const dropEl = document.getElementById("drop");
 const bandsEl = document.getElementById("bands");
 const confEl = document.getElementById("conf");
 const confVal = document.getElementById("conf-val");
+const exampleBtns = [...document.querySelectorAll("button.example")];
+exampleBtns.forEach((b) => {
+  b.disabled = true;
+});
 
 let app = null;
 let vis = [];
@@ -27,6 +31,8 @@ let lastNativeH = 0;
 let lastDets = null;
 let useWasmImage = false;
 let backend = "";
+/** Serialize ingest/infer — overlapping runs race on `app.image` across awaits. */
+let gate = Promise.resolve();
 
 function setStatus(msg) {
   statusEl.textContent = msg;
@@ -36,6 +42,12 @@ function conf() {
   // Integer milliconf (1 → 0.001) so range inputs cannot snap to 0.
   const milli = Math.max(1, Math.round(Number(confEl.value) || 1));
   return milli / 1000;
+}
+
+function enqueue(fn) {
+  const run = gate.then(fn, fn);
+  gate = run.catch(() => {});
+  return run;
 }
 
 confEl.addEventListener("input", () => {
@@ -93,6 +105,9 @@ async function boot() {
     setStatus("Loading models…");
     await app.loadWeights(det, seg);
     setStatus(`Ready (${backend}).`);
+    exampleBtns.forEach((b) => {
+      b.disabled = false;
+    });
     metaEl.textContent =
       backend === "flex" ? "Flex CPU fallback — inference may take tens of seconds." : "";
   } catch (err) {
@@ -214,42 +229,37 @@ function canInfer() {
   return useWasmImage || lastRgba;
 }
 
+function showMeta(dets, ms) {
+  const n = dets.length;
+  const scores = Array.from(dets)
+    .map((d) => {
+      const w = Math.round(d.x2 - d.x1);
+      const h = Math.round(d.y2 - d.y1);
+      return `${Number(d.det_conf).toFixed(4)} ${w}×${h}`;
+    })
+    .join(", ");
+  metaEl.textContent = `${n} detection${n === 1 ? "" : "s"} · conf≥${conf().toFixed(3)} · det=[${scores || "—"}] · ${ms} ms · ${backend}`;
+}
+
 async function runOnCanvas() {
-  if (!app || busy || !canInfer()) return;
+  if (!app || !canInfer()) return;
   if (lastDets && (!bandsEl.checked || detsHaveMasks(lastDets))) {
     redrawDets(lastDets);
     return;
   }
-  busy = true;
   const t0 = performance.now();
-  try {
-    const dets = useWasmImage
-      ? await app.infer(conf(), bandsEl.checked)
-      : await app.inferRgba(
-          lastNativeW,
-          lastNativeH,
-          lastRgba,
-          conf(),
-          bandsEl.checked,
-        );
-    lastDets = dets;
-    redrawDets(dets);
-    const ms = Math.round(performance.now() - t0);
-    const n = dets.length;
-    const scores = Array.from(dets)
-      .map((d) => {
-        const w = Math.round(d.x2 - d.x1);
-        const h = Math.round(d.y2 - d.y1);
-        return `${Number(d.det_conf).toFixed(4)} ${w}×${h}`;
-      })
-      .join(", ");
-    metaEl.textContent = `${n} detection${n === 1 ? "" : "s"} · conf≥${conf().toFixed(3)} · det=[${scores || "—"}] · ${ms} ms · ${backend}`;
-  } catch (err) {
-    console.error(err);
-    setStatus(`Infer error: ${err.message || err}`);
-  } finally {
-    busy = false;
-  }
+  const dets = useWasmImage
+    ? await app.infer(conf(), bandsEl.checked)
+    : await app.inferRgba(
+        lastNativeW,
+        lastNativeH,
+        lastRgba,
+        conf(),
+        bandsEl.checked,
+      );
+  lastDets = dets;
+  redrawDets(dets);
+  showMeta(dets, Math.round(performance.now() - t0));
 }
 
 async function ingestFile(file) {
@@ -260,35 +270,89 @@ async function ingestFile(file) {
   useWasmImage = false;
 
   const bytes = new Uint8Array(await file.arrayBuffer());
+  let displayData = null;
   try {
     const dim = app.loadImage(bytes);
     lastNativeW = dim.width;
     lastNativeH = dim.height;
     useWasmImage = true;
+    // Copy pixels out before any await so display is independent of wasm memory.
     const rgba = app.imageRgba();
-    const imageData = new ImageData(
+    displayData = new ImageData(
       new Uint8ClampedArray(rgba),
       lastNativeW,
       lastNativeH,
     );
-    lastBitmap = await createImageBitmap(imageData);
   } catch (err) {
     console.warn("wasm image decode failed, using bitmap pixels", err);
+    useWasmImage = false;
   }
 
-  if (!useWasmImage) {
+  // Infer before awaiting createImageBitmap so we never yield with a loaded
+  // image while another ingest can replace `app.image`.
+  if (useWasmImage) {
+    await runOnCanvas();
+    lastBitmap = await createImageBitmap(displayData);
+    redrawDets(lastDets);
+  } else {
     lastBitmap = await bitmapFromFile(file);
     lastNativeW = lastBitmap.width;
     lastNativeH = lastBitmap.height;
     lastRgba = rgbaFromBitmap(lastBitmap);
+    drawImageToFit(lastBitmap);
+    await runOnCanvas();
   }
-  drawImageToFit(lastBitmap);
-  await runOnCanvas();
+}
+
+async function ingestUrl(url) {
+  if (!app) return;
+  return enqueue(async () => {
+    setStatus(`Loading example…`);
+    exampleBtns.forEach((b) => {
+      b.disabled = true;
+    });
+    busy = true;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const name = url.split("/").pop() || "example.jpg";
+      const file = new File([blob], name, { type: blob.type || "image/jpeg" });
+      await ingestFile(file);
+      setStatus(`Ready (${backend}).`);
+    } catch (err) {
+      console.error(err);
+      setStatus(`Example error: ${err.message || err}`);
+    } finally {
+      busy = false;
+      exampleBtns.forEach((b) => {
+        b.disabled = false;
+      });
+    }
+  });
 }
 
 fileEl.addEventListener("change", async (ev) => {
   const file = ev.target.files?.[0];
-  if (file) await ingestFile(file);
+  if (!file) return;
+  await enqueue(async () => {
+    busy = true;
+    try {
+      await ingestFile(file);
+    } catch (err) {
+      console.error(err);
+      setStatus(`Infer error: ${err.message || err}`);
+    } finally {
+      busy = false;
+    }
+  });
+});
+
+exampleBtns.forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const src = btn.getAttribute("data-src");
+    if (src) await ingestUrl(src);
+  });
 });
 
 ["dragenter", "dragover"].forEach((name) => {
@@ -305,11 +369,34 @@ fileEl.addEventListener("change", async (ev) => {
 });
 dropEl.addEventListener("drop", async (ev) => {
   const file = ev.dataTransfer?.files?.[0];
-  if (file) await ingestFile(file);
+  if (!file) return;
+  await enqueue(async () => {
+    busy = true;
+    try {
+      await ingestFile(file);
+    } catch (err) {
+      console.error(err);
+      setStatus(`Infer error: ${err.message || err}`);
+    } finally {
+      busy = false;
+    }
+  });
 });
 
 bandsEl.addEventListener("change", async () => {
-  if (lastBitmap) await runOnCanvas();
+  if (!lastBitmap && !canInfer()) return;
+  await enqueue(async () => {
+    busy = true;
+    try {
+      if (bandsEl.checked) lastDets = null;
+      await runOnCanvas();
+    } catch (err) {
+      console.error(err);
+      setStatus(`Infer error: ${err.message || err}`);
+    } finally {
+      busy = false;
+    }
+  });
 });
 
 boot();

@@ -128,7 +128,7 @@ Dump PyTorch tensors for a numeric check: `python scripts/parity_forward.py --de
 The docs site is [Zensical](https://zensical.org/). An iframe loads a wasm-bindgen app (`web/`) that runs `process_rgb_overlay` / `process_rgb_overlay_bands` in the browser.
 
 - WebGPU (`burn/webgpu`) when `navigator.gpu` is present; otherwise Flex CPU. Default CLI `wgpu` on macOS is wgpu’s Metal HAL with CubeCL **WGSL**, not CubeCL MSL — different lowering than the browser, so YOLO scores (and boxes after NMS) can disagree on the same JPEG. See [How it works](docs/how-it-works.md#backends).
-- Upload or drop a still image, optional band-color overlay
+- Upload or drop a still image, or click a Try example (`web/examples/`); optional band-color overlay
 - Weights are fetched at runtime from `docs/app/weights/` (not `include_bytes!`)
 
 ### Local preview
@@ -160,7 +160,7 @@ python3 web/preview.py       # http://127.0.0.1:8000/hires-rs/  (wasm MIME + Pag
 
 ```
 
-`stage.sh` warns if `weights/` is missing; the iframe will load but inference will fail until those burnpacks are present. After changing `web/index.html`, `demo.js`, or `demo.css`, re-run `bash web/stage.sh` (no wasm rebuild). After changing `web/src` or `hires-rs`, re-run the `wasm-pack` commands. Use `HIRES_ONNX=1 bash web/stage.sh` only when building an ONNX wasm pack.
+`stage.sh` warns if `weights/` is missing; the iframe will load but inference will fail until those burnpacks are present. After changing `web/index.html`, `demo.js`, `demo.css`, or `web/examples/`, re-run `bash web/stage.sh` (no wasm rebuild). After changing `web/src` or `hires-rs`, re-run the `wasm-pack` commands. Use `HIRES_ONNX=1 bash web/stage.sh` only when building an ONNX wasm pack.
 
 For a faster iteration loop you can swap `--release` for `--dev` on `wasm-pack`; the GitHub Pages workflow always builds `--release`.
 
